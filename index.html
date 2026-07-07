@@ -59,7 +59,7 @@
   <p>A budget SOHO router is the perfect first target. It's <b>cheap</b> (a tenner second-hand), it <b>can't hurt you</b>, and it makes almost every classic beginner mistake: an <b>unlocked UART</b> that drops you to a root shell, an <b>unencrypted SPI flash</b> you can read with a clip, and a stock <b>Linux userland</b> full of interesting files. Brick it? Re-flash it from the SPI dump and start over. Worst case you're out a ten-euro router.</p>
 
   <h3>Your target: TP-Link TL-WR841N v14</h3>
-  <p>A wildly common 300 Mbps N router. This one runs a <b>MediaTek MT7628NN</b> MIPS SoC at 575 MHz, with <b>4 MB</b> of <b>SPI NOR flash</b> and <b>32 MB</b> of RAM, booting <b>U-Boot</b> into a Linux firmware. That's the whole stack you'll pull apart today.</p>
+  <p>A wildly common 300 Mbps N router. It's a small embedded SoC with <b>SPI NOR flash</b> and some RAM, booting <b>U-Boot</b> into a Linux firmware. That's the whole stack you'll pull apart today.</p>
   <div class="note warn">
     <div class="label">⚠ Hardware revisions differ</div>
     The TL-WR841N shipped in many hardware versions (…v13, v14…) and the SoC, flash chip, pad layout, and firmware <b>all vary between them</b>. Bench boards are <b>v14</b>, but everything below is still a starting point, so <b>read the markings on your own board</b> and verify by observation. That's half the challenge.
@@ -146,6 +146,7 @@
 
   <h3>Challenge 04 // Locating firmware online</h3>
   <p>You don't have to extract the firmware to start reading it. TP-Link hands it out. The <a href="https://www.tp-link.com/support/download/tl-wr841n/" target="_blank" rel="noopener">Download Center</a> has the stock <code class="inline">.bin</code>, and the <a href="https://www.tp-link.com/support/gpl-code/" target="_blank" rel="noopener">GPL Code Center</a> has the open-source parts. Match the file to <b>your exact hardware version</b> (TL-WR841N <b>V14</b>).</p>
+  <p style="font-size:12px;color:var(--dim);">Downloads are locked to both <b>region</b> and <b>hardware revision</b>, so grab the <b>EU · V14</b> build, not just any TL-WR841N image. The oldest V14 EU release makes a handy baseline: <a href="https://static.tp-link.com/2018/201804/20180403/TL-WR841N%28EU%29_V14_180319.zip" target="_blank" rel="noopener">TL-WR841N(EU)_V14_180319</a> (unzip for the <code class="inline">.bin</code>).</p>
   <ul class="mission">
     <li><label><input type="checkbox"><span class="task">Download the stock firmware for your exact hardware version <span class="pts">+10</span></span></label></li>
     <li><label><input type="checkbox"><span class="task">Run <code class="inline">binwalk</code> on the vendor image and identify its parts <span class="pts">+15</span></span></label></li>
@@ -192,7 +193,7 @@
       </table>
       <div class="note warn">
         <div class="label">⚠ 3.3V only</div>
-        Set the CP2102 jumper to <b>3.3V</b>, never 5V. Feeding 5V into the MT7628's 3.3V UART can kill the SoC.
+        Set the CP2102 jumper to <b>3.3V</b>, never 5V. Feeding 5V into the 3.3V UART can kill the SoC.
       </div>
     </div>
   </div>
@@ -288,7 +289,7 @@
     </tbody>
   </table>
 
-  <h3>SPI flash (SOIC-8, GD25Q32 · 4MB @ 3.3V)</h3>
+  <h3>SPI flash (SOIC-8, 3.3V)</h3>
   <pre>      ┌──────┐
  <span class="k">CS</span> ──┤1•   8├── <span class="k">VCC</span> (3V3)   <span class="c"># pin 1 = dot corner</span>
  <span class="k">DO</span> ──┤2    7├── <span class="k">HOLD</span>
@@ -315,9 +316,6 @@
     <tbody>
       <tr><td>Admin UI / LAN IP</td><td class="id">tplinkwifi.net · 192.168.0.1</td></tr>
       <tr><td>TP-Link FCC grantee code</td><td class="id">2AXJ4</td></tr>
-      <tr><td>SoC</td><td class="id">MediaTek MT7628NN @575 MHz</td></tr>
-      <tr><td>Flash</td><td class="id">GD25Q32 · 4MB (SPI NOR)</td></tr>
-      <tr><td>RAM</td><td class="id">32MB (Zentel A3S56D40)</td></tr>
       <tr><td>Bootloader</td><td class="id">U-Boot</td></tr>
     </tbody>
   </table>
